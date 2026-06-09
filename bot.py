@@ -1,4 +1,4 @@
-import asyncio
+import asyncio, os
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
@@ -18,7 +18,7 @@ from config import BOT_TOKEN
 from database import (init_db, record_message, get_top_members,
                       get_daily_totals, get_hourly_stats,
                       get_user_stats, get_chat_total, get_monthly_stats,
-                      get_unique_users, get_users_monthly_total)
+                      get_unique_users, get_users_monthly_total, get_db_path)
 
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
@@ -32,21 +32,6 @@ def esc(t: str) -> str:
     for ch in r'\_*[]()~`>#+-=|{}.!':
         t = t.replace(ch, f'\\{ch}')
     return t
-
-# ── Record every message ──────────────────────────────────────────────
-@dp.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.startswith("/"))
-async def on_message(msg: Message):
-    if not msg.from_user or msg.from_user.is_bot:
-        return
-    dt = now_wib()
-    record_message(
-        chat_id=msg.chat.id,
-        user_id=msg.from_user.id,
-        username=msg.from_user.username or "",
-        full_name=msg.from_user.full_name or "",
-        date=dt.strftime("%Y-%m-%d"),
-        hour=dt.hour,
-    )
 
 # ── /top ─────────────────────────────────────────────────────────────
 @dp.message(Command("top"))
@@ -83,6 +68,9 @@ async def cmd_stat(msg: Message):
     if target.is_bot:
         return await msg.reply("Bot tidak punya statistik\\.", parse_mode="MarkdownV2")
     row, rank = get_user_stats(msg.chat.id, target.id)
+    if not row or row["total"] is None:
+        name = esc(target.full_name or target.username or str(target.id))
+        return await msg.reply(f"👤 *{name}* belum punya data pesan\\.", parse_mode="MarkdownV2")
     name = esc(target.full_name or target.username or str(target.id))
     uname = f"@{esc(target.username)}" if target.username else "\\-"
     total = row["total"] or 0
@@ -206,15 +194,15 @@ async def cmd_jam(msg: Message):
 # ── Keyboards ────────────────────────────────────────────────────────
 def kb_main(username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Tambah ke Grup", url=f"https://t.me/{username}?startgroup=true", style="primary")],
-        [InlineKeyboardButton(text="📋 Daftar Fitur",   callback_data="show_commands", style="primary"),
-         InlineKeyboardButton(text="👤 Owner",          url="tg://user?id=568033927", style="primary")],
-        [InlineKeyboardButton(text="📢 Info Update",    url="https://t.me/oneonlysepp", style="primary")],
+        [InlineKeyboardButton(text="➕ Tambah ke Grup", url=f"https://t.me/{username}?startgroup=true")],
+        [InlineKeyboardButton(text="📋 Daftar Fitur",   callback_data="show_commands"),
+         InlineKeyboardButton(text="👤 Owner",          url="tg://user?id=568033927")],
+        [InlineKeyboardButton(text="📢 Info Update",    url="https://t.me/oneonlysepp")],
     ])
 
 def kb_back() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔙 Kembali", callback_data="back_start", style="danger")
+        InlineKeyboardButton(text="🔙 Kembali", callback_data="back_start")
     ]])
 
 TEKS_START = (
@@ -337,37 +325,56 @@ async def cmd_export(msg: Message):
     except Exception:
         await msg.reply("❌ Gagal kirim DM\\. Pastikan kamu sudah start bot dulu di private chat\\.", parse_mode="MarkdownV2")
 
+# ── Record every message (registered last so commands take priority) ──
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def on_message(msg: Message):
+    if not msg.from_user or msg.from_user.is_bot:
+        return
+    if msg.text and msg.text.startswith("/"):
+        return
+    dt = now_wib()
+    record_message(
+        chat_id=msg.chat.id,
+        user_id=msg.from_user.id,
+        username=msg.from_user.username or "",
+        full_name=msg.from_user.full_name or "",
+        date=dt.strftime("%Y-%m-%d"),
+        hour=dt.hour,
+    )
+
 # ── Main ──────────────────────────────────────────────────────────────
 OWNER_ID = 568033927
 
 async def auto_backup():
     while True:
-        now = now_wib()
-        next_run = now.replace(hour=0, minute=5, second=0, microsecond=0)
-        if now >= next_run:
-            next_run += timedelta(days=1)
-        await asyncio.sleep((next_run - now).total_seconds())
+        await asyncio.sleep(6 * 3600)  # setiap 6 jam
         try:
-            import zipfile, os
-            base = os.path.dirname(os.path.abspath(__file__))
-            buf = BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for fname in ("bot.py", "database.py", "config.py", "requirements.txt", "statbot.db"):
-                    fpath = os.path.join(base, fname)
-                    if os.path.exists(fpath):
-                        zf.write(fpath, fname)
-            buf.seek(0)
-            ts = now_wib().strftime("%Y-%m-%d")
-            await bot.send_document(
-                OWNER_ID,
-                BufferedInputFile(buf.read(), f"statbot_backup_{ts}.zip"),
-                caption=f"🗄 Auto backup — {ts}"
-            )
+            db_path = get_db_path()
+            if os.path.exists(db_path):
+                with open(db_path, "rb") as f:
+                    data = f.read()
+                ts = now_wib().strftime("%Y-%m-%d_%H%M")
+                await bot.send_document(
+                    OWNER_ID,
+                    BufferedInputFile(data, f"statbot_{ts}.json"),
+                    caption=f"🗄 Auto DB backup — {ts}"
+                )
         except Exception:
             pass
 
 async def main():
     init_db()
+    await bot.set_my_commands([
+        {"command": "start", "description": "Mulai bot"},
+        {"command": "help", "description": "Daftar fitur"},
+        {"command": "top", "description": "Top member paling aktif (30 hari)"},
+        {"command": "stat", "description": "Statistik pesan kamu"},
+        {"command": "grupstat", "description": "Statistik grup"},
+        {"command": "grafik", "description": "Grafik aktivitas 7 hari"},
+        {"command": "jam", "description": "Grafik aktivitas per jam"},
+        {"command": "statadmin", "description": "Statistik admin bulan ini"},
+        {"command": "export", "description": "Export data ke Excel (admin)"},
+    ])
     print("StatBot jalan...")
     asyncio.create_task(auto_backup())
     await dp.start_polling(bot)

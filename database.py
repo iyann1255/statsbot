@@ -1,142 +1,129 @@
-import sqlite3, os
+import json, os, threading
+from datetime import datetime, timezone, timedelta
 
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statbot.db")
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "statbot.json")
+WIB = timezone(timedelta(hours=7))
+_lock = threading.Lock()
 
-def get_con():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    return con
+# Structure: {"daily_stats": { "chat_id": { "user_id": { "date": { "count":N, "username":"", "full_name":"" } } } },
+#             "messages": [ {"chat_id":..., "user_id":..., "username":"", "full_name":"", "date":"", "hour":N} ] }
+
+def _load():
+    if os.path.exists(DB_PATH):
+        with open(DB_PATH, "r") as f:
+            return json.load(f)
+    return {"daily_stats": {}, "messages": []}
+
+def _save(db):
+    with open(DB_PATH, "w") as f:
+        json.dump(db, f, ensure_ascii=False)
+
+def _today_wib():
+    return datetime.now(WIB).strftime("%Y-%m-%d")
 
 def init_db():
-    con = get_con()
-    con.executescript("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id    INTEGER NOT NULL,
-            user_id    INTEGER NOT NULL,
-            username   TEXT,
-            full_name  TEXT,
-            date       TEXT NOT NULL,  -- YYYY-MM-DD
-            hour       INTEGER NOT NULL,
-            count      INTEGER DEFAULT 1
-        );
-        CREATE TABLE IF NOT EXISTS daily_stats (
-            chat_id  INTEGER NOT NULL,
-            user_id  INTEGER NOT NULL,
-            username TEXT,
-            full_name TEXT,
-            date     TEXT NOT NULL,
-            count    INTEGER DEFAULT 0,
-            PRIMARY KEY (chat_id, user_id, date)
-        );
-    """)
-    con.commit(); con.close()
+    with _lock:
+        if not os.path.exists(DB_PATH):
+            _save({"daily_stats": {}, "messages": []})
 
 def record_message(chat_id: int, user_id: int, username: str, full_name: str, date: str, hour: int):
-    con = get_con()
-    con.execute("""
-        INSERT INTO daily_stats (chat_id, user_id, username, full_name, date, count)
-        VALUES (?,?,?,?,?,1)
-        ON CONFLICT(chat_id, user_id, date) DO UPDATE SET
-            count = count + 1,
-            username = excluded.username,
-            full_name = excluded.full_name
-    """, (chat_id, user_id, username, full_name, date))
-    con.execute("""
-        INSERT INTO messages (chat_id, user_id, username, full_name, date, hour)
-        VALUES (?,?,?,?,?,?)
-    """, (chat_id, user_id, username, full_name, date, hour))
-    con.commit(); con.close()
+    cid, uid = str(chat_id), str(user_id)
+    with _lock:
+        db = _load()
+        ds = db["daily_stats"]
+        ds.setdefault(cid, {}).setdefault(uid, {})
+        if date in ds[cid][uid]:
+            ds[cid][uid][date]["count"] += 1
+        else:
+            ds[cid][uid][date] = {"count": 1, "username": username, "full_name": full_name}
+        ds[cid][uid][date]["username"] = username
+        ds[cid][uid][date]["full_name"] = full_name
+        db["messages"].append({"chat_id": chat_id, "user_id": user_id, "username": username, "full_name": full_name, "date": date, "hour": hour})
+        _save(db)
 
 def get_top_members(chat_id: int, limit: int = 10, days: int = 30):
-    con = get_con()
-    rows = con.execute("""
-        SELECT user_id, username, full_name, SUM(count) as total
-        FROM daily_stats
-        WHERE chat_id=? AND date >= date('now', ?)
-        GROUP BY user_id ORDER BY total DESC LIMIT ?
-    """, (chat_id, f'-{days} days', limit)).fetchall()
-    con.close()
+    since = (datetime.now(WIB) - timedelta(days=days)).strftime("%Y-%m-%d")
+    db = _load()
+    chat = db["daily_stats"].get(str(chat_id), {})
+    totals = {}
+    for uid, dates in chat.items():
+        s = sum(v["count"] for d, v in dates.items() if d >= since)
+        if s > 0:
+            sample = next(iter(dates.values()))
+            totals[uid] = {"user_id": int(uid), "username": sample["username"], "full_name": sample["full_name"], "total": s}
+    rows = sorted(totals.values(), key=lambda x: x["total"], reverse=True)[:limit]
     return rows
 
 def get_daily_totals(chat_id: int, days: int = 7):
-    con = get_con()
-    rows = con.execute("""
-        SELECT date, SUM(count) as total
-        FROM daily_stats
-        WHERE chat_id=? AND date >= date('now', ?)
-        GROUP BY date ORDER BY date ASC
-    """, (chat_id, f'-{days} days')).fetchall()
-    con.close()
-    return rows
+    since = (datetime.now(WIB) - timedelta(days=days)).strftime("%Y-%m-%d")
+    db = _load()
+    chat = db["daily_stats"].get(str(chat_id), {})
+    by_date = {}
+    for uid, dates in chat.items():
+        for d, v in dates.items():
+            if d >= since:
+                by_date[d] = by_date.get(d, 0) + v["count"]
+    return [{"date": d, "total": t} for d, t in sorted(by_date.items())]
 
 def get_hourly_stats(chat_id: int, days: int = 7):
-    con = get_con()
-    rows = con.execute("""
-        SELECT hour, COUNT(*) as total
-        FROM messages
-        WHERE chat_id=? AND date >= date('now', ?)
-        GROUP BY hour ORDER BY hour ASC
-    """, (chat_id, f'-{days} days')).fetchall()
-    con.close()
-    return rows
+    since = (datetime.now(WIB) - timedelta(days=days)).strftime("%Y-%m-%d")
+    db = _load()
+    by_hour = {}
+    for m in db["messages"]:
+        if m["chat_id"] == chat_id and m["date"] >= since:
+            h = m["hour"]
+            by_hour[h] = by_hour.get(h, 0) + 1
+    return [{"hour": h, "total": by_hour[h]} for h in sorted(by_hour)]
 
 def get_user_stats(chat_id: int, user_id: int):
-    con = get_con()
-    row = con.execute("""
-        SELECT full_name, username,
-               SUM(count) as total,
-               SUM(CASE WHEN date >= date('now', '-7 days') THEN count ELSE 0 END) as week,
-               SUM(CASE WHEN date >= date('now', '-1 days') THEN count ELSE 0 END) as today
-        FROM daily_stats
-        WHERE chat_id=? AND user_id=?
-    """, (chat_id, user_id)).fetchone()
-    rank = con.execute("""
-        SELECT COUNT(*)+1 FROM (
-            SELECT user_id, SUM(count) as total
-            FROM daily_stats WHERE chat_id=?
-            GROUP BY user_id
-            HAVING total > (
-                SELECT COALESCE(SUM(count),0) FROM daily_stats WHERE chat_id=? AND user_id=?
-            )
-        )
-    """, (chat_id, chat_id, user_id)).fetchone()[0]
-    con.close()
-    return row, rank
+    today = _today_wib()
+    week_ago = (datetime.now(WIB) - timedelta(days=7)).strftime("%Y-%m-%d")
+    db = _load()
+    dates = db["daily_stats"].get(str(chat_id), {}).get(str(user_id), {})
+    if not dates:
+        return {"total": None, "week": None, "today": None}, 1
+    total = sum(v["count"] for v in dates.values())
+    week = sum(v["count"] for d, v in dates.items() if d >= week_ago)
+    today_c = dates.get(today, {}).get("count", 0)
+    # rank
+    chat = db["daily_stats"].get(str(chat_id), {})
+    rank = 1 + sum(1 for uid, ud in chat.items() if uid != str(user_id) and sum(v["count"] for v in ud.values()) > total)
+    return {"total": total, "week": week, "today": today_c}, rank
 
 def get_chat_total(chat_id: int):
-    con = get_con()
-    row = con.execute("SELECT SUM(count) FROM daily_stats WHERE chat_id=?", (chat_id,)).fetchone()
-    con.close()
-    return row[0] or 0
+    db = _load()
+    chat = db["daily_stats"].get(str(chat_id), {})
+    return sum(v["count"] for uid in chat.values() for v in uid.values())
 
 def get_users_monthly_total(chat_id: int, year: int, month: int, user_ids: list):
     if not user_ids:
         return {}
-    con = get_con()
-    placeholders = ",".join("?" * len(user_ids))
-    rows = con.execute(f"""
-        SELECT user_id, SUM(count) as total
-        FROM daily_stats
-        WHERE chat_id=? AND strftime('%Y-%m', date)=? AND user_id IN ({placeholders})
-        GROUP BY user_id
-    """, (chat_id, f"{year:04d}-{month:02d}", *user_ids)).fetchall()
-    con.close()
-    return {r["user_id"]: r["total"] for r in rows}
+    prefix = f"{year:04d}-{month:02d}"
+    db = _load()
+    chat = db["daily_stats"].get(str(chat_id), {})
+    result = {}
+    for uid in user_ids:
+        dates = chat.get(str(uid), {})
+        t = sum(v["count"] for d, v in dates.items() if d.startswith(prefix))
+        if t:
+            result[uid] = t
+    return result
 
 def get_unique_users(chat_id: int):
-    con = get_con()
-    row = con.execute("SELECT COUNT(DISTINCT user_id) FROM daily_stats WHERE chat_id=?", (chat_id,)).fetchone()
-    con.close()
-    return row[0] or 0
+    db = _load()
+    return len(db["daily_stats"].get(str(chat_id), {}))
 
 def get_monthly_stats(chat_id: int, year: int, month: int):
-    con = get_con()
-    rows = con.execute("""
-        SELECT user_id, username, full_name, date, SUM(count) as total
-        FROM daily_stats
-        WHERE chat_id=? AND strftime('%Y-%m', date)=?
-        GROUP BY user_id, date ORDER BY date ASC, total DESC
-    """, (chat_id, f"{year:04d}-{month:02d}")).fetchall()
-    con.close()
+    prefix = f"{year:04d}-{month:02d}"
+    db = _load()
+    chat = db["daily_stats"].get(str(chat_id), {})
+    rows = []
+    for uid, dates in chat.items():
+        for d, v in dates.items():
+            if d.startswith(prefix):
+                rows.append({"user_id": int(uid), "username": v["username"], "full_name": v["full_name"], "date": d, "total": v["count"]})
+    rows.sort(key=lambda x: (x["date"], -x["total"]))
     return rows
+
+def get_db_path():
+    return DB_PATH
