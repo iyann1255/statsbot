@@ -37,7 +37,7 @@ def esc(t: str) -> str:
 @dp.message(Command("top"))
 async def cmd_top(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     if not msg.from_user:
         return
 
@@ -46,14 +46,14 @@ async def cmd_top(msg: Message):
 
     rows = get_top_members(msg.chat.id, limit=limit, days=30)
     if not rows:
-        return await msg.reply("Belum ada data\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Belum ada data pesan\\.", parse_mode="MarkdownV2")
     medals = ["🥇","🥈","🥉"] + [f"{i}\\." for i in range(4, limit + 1)]
     lines = []
     for i, r in enumerate(rows):
         name = esc(r["full_name"] or r["username"] or str(r["user_id"]))
         lines.append(f"{medals[i]} {name} — *{esc(str(r['total']))}* pesan")
     await msg.reply(
-        f"🏆 *Top {limit} Member \\(30 hari\\)*\n\n" + "\n".join(lines),
+        f"🏆 *Top {limit} Member \\(30 hari terakhir\\)*\n\n" + "\n".join(lines),
         parse_mode="MarkdownV2"
     )
 
@@ -61,7 +61,7 @@ async def cmd_top(msg: Message):
 @dp.message(Command("stat"))
 async def cmd_stat(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     if not msg.from_user:
         return
     target = msg.reply_to_message.from_user if msg.reply_to_message else msg.from_user
@@ -77,12 +77,12 @@ async def cmd_stat(msg: Message):
     week  = row["week"]  or 0
     today = row["today"] or 0
     await msg.reply(
-        f"👤 *Statistik {name}*\n"
-        f"🔗 {uname}\n\n"
-        f"📊 Total pesan : *{esc(str(total))}*\n"
-        f"📅 7 hari ini  : *{esc(str(week))}*\n"
-        f"🕐 Hari ini    : *{esc(str(today))}*\n"
-        f"🏅 Peringkat   : *\\#{esc(str(rank))}*",
+        f"👤 *{name}*\n"
+        f"{uname}\n\n"
+        f"Total pesan: *{esc(str(total))}*\n"
+        f"7 hari ini: *{esc(str(week))}*\n"
+        f"Hari ini: *{esc(str(today))}*\n"
+        f"Peringkat: *\\#{esc(str(rank))}*",
         parse_mode="MarkdownV2"
     )
 
@@ -90,12 +90,12 @@ async def cmd_stat(msg: Message):
 @dp.message(Command("statadmin"))
 async def cmd_statadmin(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     if not msg.from_user:
         return
     member = await bot.get_chat_member(msg.chat.id, msg.from_user.id)
     if member.status not in ("administrator", "creator"):
-        return await msg.reply("❌ Hanya admin yang bisa menggunakan perintah ini\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Hanya admin yang bisa pakai perintah ini\\.", parse_mode="MarkdownV2")
 
     now = now_wib()
     admins = await bot.get_chat_administrators(msg.chat.id)
@@ -120,7 +120,7 @@ async def cmd_statadmin(msg: Message):
 @dp.message(Command("grupstat"))
 async def cmd_grupstat(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     total = get_chat_total(msg.chat.id)
     rows7 = get_daily_totals(msg.chat.id, days=7)
     week  = sum(r["total"] for r in rows7)
@@ -128,9 +128,9 @@ async def cmd_grupstat(msg: Message):
     today = next((r["total"] for r in rows7 if r["date"] == today_str), 0)
     await msg.reply(
         f"📊 *Statistik Grup*\n\n"
-        f"💬 Total pesan : *{esc(str(total))}*\n"
-        f"📅 7 hari ini  : *{esc(str(week))}*\n"
-        f"🕐 Hari ini    : *{esc(str(today))}*",
+        f"Total pesan: *{esc(str(total))}*\n"
+        f"7 hari ini: *{esc(str(week))}*\n"
+        f"Hari ini: *{esc(str(today))}*",
         parse_mode="MarkdownV2"
     )
 
@@ -138,10 +138,10 @@ async def cmd_grupstat(msg: Message):
 @dp.message(Command("grafik"))
 async def cmd_grafik(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     rows = get_daily_totals(msg.chat.id, days=7)
     if not rows:
-        return await msg.reply("Belum ada data\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Belum ada data pesan\\.", parse_mode="MarkdownV2")
 
     dates  = [r["date"][5:] for r in rows]   # MM-DD
     totals = [r["total"] for r in rows]
@@ -165,10 +165,10 @@ async def cmd_grafik(msg: Message):
 @dp.message(Command("jam"))
 async def cmd_jam(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     rows = get_hourly_stats(msg.chat.id, days=7)
     if not rows:
-        return await msg.reply("Belum ada data\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Belum ada data pesan\\.", parse_mode="MarkdownV2")
 
     hours  = [r["hour"] for r in rows]
     totals = [r["total"] for r in rows]
@@ -194,36 +194,36 @@ async def cmd_jam(msg: Message):
 # ── Keyboards ────────────────────────────────────────────────────────
 def kb_main(username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Tambah ke Grup", url=f"https://t.me/{username}?startgroup=true")],
-        [InlineKeyboardButton(text="📋 Daftar Fitur",   callback_data="show_commands"),
-         InlineKeyboardButton(text="👤 Owner",          url="tg://user?id=568033927")],
-        [InlineKeyboardButton(text="📢 Info Update",    url="https://t.me/oneonlysepp")],
+        [InlineKeyboardButton(text="Tambah ke Grup", url=f"https://t.me/{username}?startgroup=true")],
+        [InlineKeyboardButton(text="Daftar Perintah", callback_data="show_commands"),
+         InlineKeyboardButton(text="Owner", url="tg://user?id=568033927")],
+        [InlineKeyboardButton(text="Info Update", url="https://t.me/oneonlysepp")],
     ])
 
 def kb_back() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔙 Kembali", callback_data="back_start")
+        InlineKeyboardButton(text="Kembali", callback_data="back_start")
     ]])
 
 TEKS_START = (
     "📊 *StatBot*\n\n"
-    "Bot statistik pesan untuk grup Telegram\\.\n"
-    "Rekam & tampilkan aktivitas member secara otomatis\\.\n\n"
-    "✅ Tidak perlu jadi admin\n"
-    "✅ Rekam pesan semua member\n"
-    "✅ Grafik aktivitas harian & per jam\n"
-    "✅ Top member, stat personal, stat grup"
+    "Pantau aktivitas chat grup kamu secara otomatis\\.\n\n"
+    "• Tidak perlu jadi admin\n"
+    "• Rekam pesan semua member\n"
+    "• Grafik harian & per jam\n"
+    "• Ranking, statistik personal & grup"
 )
 
 TEKS_COMMANDS = (
-    "📊 *Daftar Fitur StatBot*\n\n"
-    "🏆 /top — Top 10 member paling aktif \\(30 hari\\)\n"
-    "👤 /stat — Statistik pesanmu \\(reply untuk cek orang lain\\)\n"
-    "📊 /grupstat — Ringkasan statistik grup\n"
-    "📈 /grafik — Grafik aktivitas 7 hari terakhir\n"
-    "🕐 /jam — Grafik aktivitas per jam \\(WIB\\)\n"
-    "📋 /statadmin — Statistik pesan admin bulan ini \\(khusus admin\\)\n\n"
-    "💡 Tambahkan bot ke grup, langsung aktif tanpa pengaturan\\."
+    "📋 *Daftar Perintah*\n\n"
+    "/top — Ranking member teraktif \\(30 hari\\)\n"
+    "/stat — Statistik pesanmu \\(reply = cek orang lain\\)\n"
+    "/grupstat — Ringkasan aktivitas grup\n"
+    "/grafik — Grafik 7 hari terakhir\n"
+    "/jam — Aktivitas per jam \\(WIB\\)\n"
+    "/statadmin — Statistik admin bulan ini\n"
+    "/export — Export data ke Excel\n\n"
+    "Tambahkan ke grup, langsung jalan\\."
 )
 
 # ── /start ───────────────────────────────────────────────────────────
@@ -254,14 +254,14 @@ async def cb_back_start(cb: CallbackQuery):
 @dp.message(Command("export"))
 async def cmd_export(msg: Message):
     if msg.chat.type not in ("group", "supergroup"):
-        return await msg.reply("Gunakan di grup\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Perintah ini hanya untuk grup\\.", parse_mode="MarkdownV2")
     if not msg.from_user:
         return
 
     # Cek apakah pengirim adalah admin/owner
     member = await bot.get_chat_member(msg.chat.id, msg.from_user.id)
     if member.status not in ("administrator", "creator"):
-        return await msg.reply("❌ Hanya admin yang bisa export data\\.", parse_mode="MarkdownV2")
+        return await msg.reply("Hanya admin yang bisa export data\\.", parse_mode="MarkdownV2")
 
     now = now_wib()
     args = (msg.text or "").split()
@@ -321,9 +321,9 @@ async def cmd_export(msg: Message):
             caption=f"📊 Export statistik *{chat_name}* bulan *{month_esc}*",
             parse_mode="MarkdownV2"
         )
-        await msg.reply("✅ File Excel sudah dikirim ke DM kamu\\.", parse_mode="MarkdownV2")
+        await msg.reply("File dikirim ke DM kamu\\.", parse_mode="MarkdownV2")
     except Exception:
-        await msg.reply("❌ Gagal kirim DM\\. Pastikan kamu sudah start bot dulu di private chat\\.", parse_mode="MarkdownV2")
+        await msg.reply("Gagal kirim DM\\. Pastikan kamu sudah /start bot di private chat\\.", parse_mode="MarkdownV2")
 
 # ── Record every message (registered last so commands take priority) ──
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
